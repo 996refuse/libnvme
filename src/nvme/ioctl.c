@@ -22,9 +22,14 @@
 #include <ccan/build_assert/build_assert.h>
 #include <ccan/endian/endian.h>
 
+#include <liburing.h>
+
 #include "ioctl.h"
 #include "util.h"
 #include "log.h"
+
+// #include <linux/nvme_ioctl.h>
+// #include <linux/io_uring.h>
 
 static int nvme_verify_chr(int fd)
 {
@@ -314,6 +319,95 @@ int nvme_get_log(struct nvme_get_log_args *args)
 		return -1;
 	}
 	return nvme_submit_admin_passthru(args->fd, &cmd, args->result);
+}
+
+int iouring_setup(struct io_uring *ring)
+{
+	// 512 * 1024 / 4096 = 128
+    return io_uring_queue_init(128, ring, IORING_SETUP_SQE128 | IORING_SETUP_CQE32);
+}
+
+void iouring_exit(struct io_uring *ring)
+{
+    io_uring_queue_exit(ring);
+}
+
+// #define NVME_URING_CMD_ADMIN	_IOWR('N', 0x82, struct nvme_uring_cmd)
+
+int iouring_passthru_enqueue(struct io_uring *ring, struct nvme_get_log_args *args)
+{
+	__u32 numd = (args->len >> 2) - 1;
+	__u16 numdu = numd >> 16, numdl = numd & 0xffff;
+
+	__u32 cdw10 = NVME_SET(args->lid, LOG_CDW10_LID) |
+			NVME_SET(args->lsp, LOG_CDW10_LSP) |
+			NVME_SET(!!args->rae, LOG_CDW10_RAE) |
+			NVME_SET(numdl, LOG_CDW10_NUMDL);
+	__u32 cdw11 = NVME_SET(numdu, LOG_CDW11_NUMDU) |
+			NVME_SET(args->lsi, LOG_CDW11_LSI);
+	__u32 cdw12 = args->lpo & 0xffffffff;
+	__u32 cdw13 = args->lpo >> 32;
+	__u32 cdw14 = NVME_SET(args->uuidx, LOG_CDW14_UUID) |
+			NVME_SET(!!args->ot, LOG_CDW14_OT) |
+			NVME_SET(args->csi, LOG_CDW14_CSI);
+
+	struct nvme_uring_cmd cmd = {
+		.opcode		= nvme_admin_get_log_page,
+		.nsid		= args->nsid,
+		.addr		= (__u64)(uintptr_t)args->log,
+		.data_len	= args->len,
+		.cdw10		= cdw10,
+		.cdw11		= cdw11,
+		.cdw12		= cdw12,
+		.cdw13		= cdw13,
+		.cdw14		= cdw14,
+		.timeout_ms	= args->timeout,
+	};
+
+	if (args->args_size < sizeof(struct nvme_get_log_args)) {
+		errno = EINVAL;
+		return -1;
+	}
+
+    struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
+    if (!sqe) {
+        printf("Failed to get io_uring sqe\n");
+        return -1;
+    }
+
+    sqe->fd = args->fd;
+    sqe->opcode = IORING_OP_URING_CMD;
+    sqe->cmd_op = NVME_URING_CMD_ADMIN;
+
+    // cmd = (void *)&sqe->cmd;
+    memcpy(sqe->cmd, &cmd, sizeof(struct nvme_uring_cmd));
+
+	int nr = io_uring_submit(ring);
+    if (nr < 0) {
+        perror("io_uring_submit");
+        return -1;
+    }
+    return 0;
+}
+
+int iouring_wait_nr(struct io_uring *ring, int nr)
+{
+    struct io_uring_cqe *cqes = NULL;
+    if (io_uring_wait_cqe_nr(ring, &cqes, nr) < 0) {
+        perror("io_uring_wait_cqes");
+        return -1;
+    }
+    for (int i = 0; i < nr; i++) {
+        struct io_uring_cqe *cqe = &cqes[i];
+        int err = cqe->big_cqe[0] || cqe->res;
+        if (err) {
+            fprintf(stderr, "io_uring_wait_cqe_nr: %d, %s\n", err, strerror(-err));
+            return -1;
+        } else {
+			printf("$$$$$ group %4d received...\n", i);
+		}
+    }
+    return nr;
 }
 
 int nvme_get_log_page(int fd, __u32 xfer_len, struct nvme_get_log_args *args)
