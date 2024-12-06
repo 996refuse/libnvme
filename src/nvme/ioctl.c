@@ -8,6 +8,7 @@
  */
 #include <errno.h>
 #include <fcntl.h>
+#include <liburing.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -21,8 +22,6 @@
 
 #include <ccan/build_assert/build_assert.h>
 #include <ccan/endian/endian.h>
-
-#include <liburing.h>
 
 #include "ioctl.h"
 #include "util.h"
@@ -414,7 +413,7 @@ int nvme_get_log_page(int fd, __u32 xfer_len, struct nvme_get_log_args *args)
 
 	struct io_uring ring;
 	int n = 0;
-	int ret = iouring_setup(&ring);
+	ret = nvme_uring_cmd_setup(&ring);
 	if(ret < 0)
 		fprintf(stderr, "iouring_setup failed !!! \n");
 
@@ -439,7 +438,7 @@ int nvme_get_log_page(int fd, __u32 xfer_len, struct nvme_get_log_args *args)
 
 #ifdef CONFIG_LIBURING
 		if (n >= NVME_URING_ENTRIES) {
-			iouring_wait_nr(&ring, n);
+			nvme_uring_cmd_wait_complete(&ring, n);
 			n = 0;
 		}
 		n += 1;

@@ -4265,9 +4265,4 @@ int nvme_zns_append(struct nvme_zns_append_args *args);
  */
 int nvme_dim_send(struct nvme_dim_args *args);
 
-int  nvme_uring_cmd_setup(struct io_uring *ring);
-void nvme_uring_cmd_exit(struct io_uring *ring);
-int  nvme_uring_cmd_admin_passthru_async(struct io_uring *ring, struct nvme_get_log_args *args);
-int  nvme_uring_cmd_wait_complete(struct io_uring *ring, int n);
-
 #endif /* _LIBNVME_IOCTL_H */
