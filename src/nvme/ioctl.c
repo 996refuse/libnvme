@@ -441,7 +441,7 @@ int nvme_get_log_page(int fd, __u32 xfer_len, struct nvme_get_log_args *args)
 		ret = nvme_get_log(args);
 #endif
 		if (ret)
-			return -1;
+			return ret;
 
 		offset += xfer;
 		ptr += xfer;
