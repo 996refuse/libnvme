@@ -321,20 +321,19 @@ int nvme_get_log(struct nvme_get_log_args *args)
 	return nvme_submit_admin_passthru(args->fd, &cmd, args->result);
 }
 
-int iouring_setup(struct io_uring *ring)
+#ifdef CONFIG_LIBURING
+
+static int nvme_uring_cmd_setup(struct io_uring *ring)
 {
-	// 512 * 1024 / 4096 = 128
-    return io_uring_queue_init(128, ring, IORING_SETUP_SQE128 | IORING_SETUP_CQE32);
+    return io_uring_queue_init(NVME_URING_ENTRIES, ring, IORING_SETUP_SQE128 | IORING_SETUP_CQE32);
 }
 
-void iouring_exit(struct io_uring *ring)
+static void nvme_uring_cmd_exit(struct io_uring *ring)
 {
     io_uring_queue_exit(ring);
 }
 
-// #define NVME_URING_CMD_ADMIN	_IOWR('N', 0x82, struct nvme_uring_cmd)
-
-int iouring_passthru_enqueue(struct io_uring *ring, struct nvme_get_log_args *args)
+static int nvme_uring_cmd_admin_passthru_async(struct io_uring *ring, struct nvme_get_log_args *args)
 {
 	__u32 numd = (args->len >> 2) - 1;
 	__u16 numdu = numd >> 16, numdl = numd & 0xffff;
@@ -351,19 +350,6 @@ int iouring_passthru_enqueue(struct io_uring *ring, struct nvme_get_log_args *ar
 			NVME_SET(!!args->ot, LOG_CDW14_OT) |
 			NVME_SET(args->csi, LOG_CDW14_CSI);
 
-	struct nvme_uring_cmd cmd = {
-		.opcode		= nvme_admin_get_log_page,
-		.nsid		= args->nsid,
-		.addr		= (__u64)(uintptr_t)args->log,
-		.data_len	= args->len,
-		.cdw10		= cdw10,
-		.cdw11		= cdw11,
-		.cdw12		= cdw12,
-		.cdw13		= cdw13,
-		.cdw14		= cdw14,
-		.timeout_ms	= args->timeout,
-	};
-
 	if (args->args_size < sizeof(struct nvme_get_log_args)) {
 		errno = EINVAL;
 		return -1;
@@ -371,44 +357,50 @@ int iouring_passthru_enqueue(struct io_uring *ring, struct nvme_get_log_args *ar
 
     struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
     if (!sqe) {
-        printf("Failed to get io_uring sqe\n");
+        fprintf(stderr, "sqe is full, Failed to get io_uring sqe\n");
         return -1;
     }
+
+	struct nvme_uring_cmd *cmd = (void *)&sqe->cmd;
+
+	cmd->opcode             = nvme_admin_get_log_page,
+	cmd->nsid               = args->nsid,
+	cmd->addr               = (__u64)(uintptr_t)args->log,
+	cmd->data_len   = args->len,
+	cmd->cdw10              = cdw10,
+	cmd->cdw11              = cdw11,
+	cmd->cdw12              = cdw12,
+	cmd->cdw13              = cdw13,
+	cmd->cdw14              = cdw14,
+	cmd->timeout_ms = args->timeout,
 
     sqe->fd = args->fd;
     sqe->opcode = IORING_OP_URING_CMD;
     sqe->cmd_op = NVME_URING_CMD_ADMIN;
 
-    // cmd = (void *)&sqe->cmd;
-    memcpy(sqe->cmd, &cmd, sizeof(struct nvme_uring_cmd));
-
-	int nr = io_uring_submit(ring);
-    if (nr < 0) {
+	int ret = io_uring_submit(ring);
+    if (ret < 0) {
         perror("io_uring_submit");
         return -1;
     }
     return 0;
 }
 
-int iouring_wait_nr(struct io_uring *ring, int nr)
+static int nvme_uring_cmd_wait_complete(struct io_uring *ring, int n)
 {
-    struct io_uring_cqe *cqes = NULL;
-    if (io_uring_wait_cqe_nr(ring, &cqes, nr) < 0) {
-        perror("io_uring_wait_cqes");
-        return -1;
-    }
-    for (int i = 0; i < nr; i++) {
-        struct io_uring_cqe *cqe = &cqes[i];
-        int err = cqe->big_cqe[0] || cqe->res;
-        if (err) {
-            fprintf(stderr, "io_uring_wait_cqe_nr: %d, %s\n", err, strerror(-err));
-            return -1;
-        } else {
-			printf("$$$$$ group %4d received...\n", i);
+	struct io_uring_cqe *cqe;
+	for (int i = 0; i < n; i++) {
+		int ret = io_uring_wait_cqe(ring, &cqe);
+		if (ret < 0) {
+			perror("io_uring_wait_cqe failed");
+			return -1;
 		}
-    }
-    return nr;
+		io_uring_cqe_seen(ring, cqe);
+	}
+	return n;
 }
+
+#endif
 
 int nvme_get_log_page(int fd, __u32 xfer_len, struct nvme_get_log_args *args)
 {
@@ -419,6 +411,12 @@ int nvme_get_log_page(int fd, __u32 xfer_len, struct nvme_get_log_args *args)
 	int ret;
 
 	args->fd = fd;
+
+	struct io_uring ring;
+	int n = 0;
+	int ret = iouring_setup(&ring);
+	if(ret < 0)
+		fprintf(stderr, "iouring_setup failed !!! \n");
 
 	/*
 	 * 4k is the smallest possible transfer unit, so restricting to 4k
@@ -438,13 +436,29 @@ int nvme_get_log_page(int fd, __u32 xfer_len, struct nvme_get_log_args *args)
 		args->len = xfer;
 		args->log = ptr;
 		args->rae = offset + xfer < data_len || retain;
+
+#ifdef CONFIG_LIBURING
+		if (n >= NVME_URING_ENTRIES) {
+			iouring_wait_nr(&ring, n);
+			n = 0;
+		}
+		n += 1;
+		ret = nvme_uring_cmd_admin_passthru_async(&ring, args);
+#else
 		ret = nvme_get_log(args);
+#endif
+
 		if (ret)
 			return ret;
 
 		offset += xfer;
 		ptr += xfer;
 	} while (offset < data_len);
+
+#ifdef CONFIG_LIBURING
+	nvme_uring_cmd_wait_complete(&ring, n);
+	nvme_uring_cmd_exit(&ring);
+#endif
 
 	return 0;
 }

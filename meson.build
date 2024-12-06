@@ -69,6 +69,7 @@ endif
 conf.set('CONFIG_JSONC', json_c_dep.found(), description: 'Is json-c required?')
 
 liburing_dep = dependency('liburing', version: '>=2.2', required: get_option('liburing'), fallback: [])
+conf.set('CONFIG_LIBURING', liburing_dep.found(), description: 'Is liburing available?')
 
 if get_option('openssl').disabled()
   openssl_dep = dependency('', required: false)

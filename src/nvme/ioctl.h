@@ -40,6 +40,11 @@
  */
 #define NVME_LOG_PAGE_PDU_SIZE 4096
 
+/*
+ *
+ */
+#define NVME_URING_ENTRIES 16
+
 /**
  * struct nvme_passthru_cmd - nvme passthrough command structure
  * @opcode:	Operation code, see &enum nvme_io_opcodes and &enum nvme_admin_opcodes
@@ -1319,11 +1324,6 @@ static inline int nvme_zns_identify_ctrl(int fd, struct nvme_zns_id_ctrl *id)
 {
 	return nvme_identify_ctrl_csi(fd, NVME_CSI_ZNS, id);
 }
-
-int iouring_setup(struct io_uring *ring);
-void iouring_exit(struct io_uring *ring);
-int iouring_passthru_enqueue(struct io_uring *ring, struct nvme_get_log_args *args);
-int iouring_wait_nr(struct io_uring *ring, int nr);
 
 /**
  * nvme_get_log() - NVMe Admin Get Log command
@@ -4264,5 +4264,10 @@ int nvme_zns_append(struct nvme_zns_append_args *args);
  * &enum nvme_status_field) or -1 with errno set otherwise.
  */
 int nvme_dim_send(struct nvme_dim_args *args);
+
+int  nvme_uring_cmd_setup(struct io_uring *ring);
+void nvme_uring_cmd_exit(struct io_uring *ring);
+int  nvme_uring_cmd_admin_passthru_async(struct io_uring *ring, struct nvme_get_log_args *args);
+int  nvme_uring_cmd_wait_complete(struct io_uring *ring, int n);
 
 #endif /* _LIBNVME_IOCTL_H */
