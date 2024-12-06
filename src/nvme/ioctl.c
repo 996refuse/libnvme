@@ -320,12 +320,12 @@ int nvme_get_log(struct nvme_get_log_args *args)
 #ifdef CONFIG_LIBURING
 static int nvme_uring_cmd_setup(struct io_uring *ring)
 {
-    return io_uring_queue_init(NVME_URING_ENTRIES, ring, IORING_SETUP_SQE128 | IORING_SETUP_CQE32);
+	return io_uring_queue_init(NVME_URING_ENTRIES, ring, IORING_SETUP_SQE128 | IORING_SETUP_CQE32);
 }
 
 static void nvme_uring_cmd_exit(struct io_uring *ring)
 {
-    io_uring_queue_exit(ring);
+	io_uring_queue_exit(ring);
 }
 
 static int nvme_uring_cmd_admin_passthru_async(struct io_uring *ring, struct nvme_get_log_args *args)
@@ -350,35 +350,35 @@ static int nvme_uring_cmd_admin_passthru_async(struct io_uring *ring, struct nvm
 		return -1;
 	}
 
-    struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
-    if (!sqe) {
-        fprintf(stderr, "sqe is full, Failed to get io_uring sqe\n");
-        return -1;
-    }
+	struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
+	if (!sqe) {
+		fprintf(stderr, "sqe is full, Failed to get io_uring sqe\n");
+		return -1;
+	}
 
 	struct nvme_uring_cmd *cmd = (void *)&sqe->cmd;
 
-	cmd->opcode             = nvme_admin_get_log_page,
-	cmd->nsid               = args->nsid,
-	cmd->addr               = (__u64)(uintptr_t)args->log,
-	cmd->data_len   = args->len,
-	cmd->cdw10              = cdw10,
-	cmd->cdw11              = cdw11,
-	cmd->cdw12              = cdw12,
-	cmd->cdw13              = cdw13,
-	cmd->cdw14              = cdw14,
-	cmd->timeout_ms = args->timeout,
+	cmd->opcode        = nvme_admin_get_log_page,
+	cmd->nsid          = args->nsid,
+	cmd->addr          = (__u64)(uintptr_t)args->log,
+	cmd->data_len      = args->len,
+	cmd->cdw10         = cdw10,
+	cmd->cdw11         = cdw11,
+	cmd->cdw12         = cdw12,
+	cmd->cdw13         = cdw13,
+	cmd->cdw14         = cdw14,
+	cmd->timeout_ms    = args->timeout,
 
-    sqe->fd = args->fd;
-    sqe->opcode = IORING_OP_URING_CMD;
-    sqe->cmd_op = NVME_URING_CMD_ADMIN;
+	sqe->fd = args->fd;
+	sqe->opcode = IORING_OP_URING_CMD;
+	sqe->cmd_op = NVME_URING_CMD_ADMIN;
 
 	int ret = io_uring_submit(ring);
-    if (ret < 0) {
-        perror("io_uring_submit");
-        return -1;
-    }
-    return 0;
+	if (ret < 0) {
+		perror("io_uring_submit");
+		return -1;
+	}
+	return 0;
 }
 
 static int nvme_uring_cmd_wait_complete(struct io_uring *ring, int n)
