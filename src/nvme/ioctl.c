@@ -351,10 +351,8 @@ static int nvme_uring_cmd_admin_passthru_async(struct io_uring *ring, struct nvm
 	}
 
 	struct io_uring_sqe *sqe = io_uring_get_sqe(ring);
-	if (!sqe) {
-		fprintf(stderr, "sqe is full, Failed to get io_uring sqe\n");
+	if (!sqe)
 		return -1;
-	}
 
 	struct nvme_uring_cmd *cmd = (void *)&sqe->cmd;
 
@@ -374,8 +372,8 @@ static int nvme_uring_cmd_admin_passthru_async(struct io_uring *ring, struct nvm
 	sqe->cmd_op = NVME_URING_CMD_ADMIN;
 
 	int ret = io_uring_submit(ring);
-	if (ret < 0) {
-		perror("io_uring_submit");
+	if (ret) {
+		errno = -ret;
 		return -1;
 	}
 	return 0;
@@ -386,8 +384,8 @@ static int nvme_uring_cmd_wait_complete(struct io_uring *ring, int n)
 	struct io_uring_cqe *cqe;
 	for (int i = 0; i < n; i++) {
 		int ret = io_uring_wait_cqe(ring, &cqe);
-		if (ret < 0) {
-			perror("io_uring_wait_cqe failed");
+		if (ret) {
+			errno = -ret;
 			return -1;
 		}
 		io_uring_cqe_seen(ring, cqe);
@@ -409,8 +407,10 @@ int nvme_get_log_page(int fd, __u32 xfer_len, struct nvme_get_log_args *args)
 	struct io_uring ring;
 	int n = 0;
 	ret = nvme_uring_cmd_setup(&ring);
-	if(ret < 0)
-		fprintf(stderr, "iouring_setup failed !!! \n");
+	if(ret) {
+		errno = -ret;
+		return -1;
+	}
 
 	/*
 	 * 4k is the smallest possible transfer unit, so restricting to 4k
@@ -441,14 +441,16 @@ int nvme_get_log_page(int fd, __u32 xfer_len, struct nvme_get_log_args *args)
 		ret = nvme_get_log(args);
 #endif
 		if (ret)
-			return ret;
+			return -1;
 
 		offset += xfer;
 		ptr += xfer;
 	} while (offset < data_len);
 
 #ifdef CONFIG_LIBURING
-	nvme_uring_cmd_wait_complete(&ring, n);
+	ret = nvme_uring_cmd_wait_complete(&ring, n);
+	if (ret < 0)
+		return -1;
 	nvme_uring_cmd_exit(&ring);
 #endif
 
