@@ -27,9 +27,6 @@
 #include "util.h"
 #include "log.h"
 
-// #include <linux/nvme_ioctl.h>
-// #include <linux/io_uring.h>
-
 static int nvme_verify_chr(int fd)
 {
 	static struct stat nvme_stat;
@@ -321,7 +318,6 @@ int nvme_get_log(struct nvme_get_log_args *args)
 }
 
 #ifdef CONFIG_LIBURING
-
 static int nvme_uring_cmd_setup(struct io_uring *ring)
 {
     return io_uring_queue_init(NVME_URING_ENTRIES, ring, IORING_SETUP_SQE128 | IORING_SETUP_CQE32);
@@ -398,7 +394,6 @@ static int nvme_uring_cmd_wait_complete(struct io_uring *ring, int n)
 	}
 	return n;
 }
-
 #endif
 
 int nvme_get_log_page(int fd, __u32 xfer_len, struct nvme_get_log_args *args)
@@ -435,7 +430,6 @@ int nvme_get_log_page(int fd, __u32 xfer_len, struct nvme_get_log_args *args)
 		args->len = xfer;
 		args->log = ptr;
 		args->rae = offset + xfer < data_len || retain;
-
 #ifdef CONFIG_LIBURING
 		if (n >= NVME_URING_ENTRIES) {
 			nvme_uring_cmd_wait_complete(&ring, n);
@@ -446,7 +440,6 @@ int nvme_get_log_page(int fd, __u32 xfer_len, struct nvme_get_log_args *args)
 #else
 		ret = nvme_get_log(args);
 #endif
-
 		if (ret)
 			return ret;
 
