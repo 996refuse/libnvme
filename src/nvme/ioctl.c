@@ -372,7 +372,7 @@ static int nvme_uring_cmd_admin_passthru_async(struct io_uring *ring, struct nvm
 	sqe->cmd_op = NVME_URING_CMD_ADMIN;
 
 	int ret = io_uring_submit(ring);
-	if (ret) {
+	if (ret < 0) {
 		errno = -ret;
 		return -1;
 	}
