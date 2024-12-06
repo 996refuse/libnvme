@@ -404,6 +404,7 @@ int nvme_get_log_page(int fd, __u32 xfer_len, struct nvme_get_log_args *args)
 
 	args->fd = fd;
 
+#ifdef CONFIG_LIBURING
 	struct io_uring ring;
 	int n = 0;
 	ret = nvme_uring_cmd_setup(&ring);
@@ -411,7 +412,7 @@ int nvme_get_log_page(int fd, __u32 xfer_len, struct nvme_get_log_args *args)
 		errno = -ret;
 		return -1;
 	}
-
+#endif
 	/*
 	 * 4k is the smallest possible transfer unit, so restricting to 4k
 	 * avoids having to check the MDTS value of the controller.
