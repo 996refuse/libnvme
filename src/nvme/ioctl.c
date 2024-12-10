@@ -323,6 +323,11 @@ int nvme_get_log(struct nvme_get_log_args *args)
 #ifdef CONFIG_LIBURING
 static int nvme_uring_cmd_setup(struct io_uring *ring)
 {
+	struct io_uring_probe *probe = io_uring_get_probe();
+	if (!io_uring_opcode_supported(probe, IORING_OP_URING_CMD)) {
+		perror("IORING_OP_URING_CMD is not supported for the kernel version below 5.19, failback ioctl interface.");
+		return -1;
+	}
 	return io_uring_queue_init(NVME_URING_ENTRIES, ring, IORING_SETUP_SQE128 | IORING_SETUP_CQE32);
 }
 
@@ -407,14 +412,13 @@ int nvme_get_log_page(int fd, __u32 xfer_len, struct nvme_get_log_args *args)
 
 	args->fd = fd;
 
+	bool failback = true;
 #ifdef CONFIG_LIBURING
 	struct io_uring ring;
 	int n = 0;
 	ret = nvme_uring_cmd_setup(&ring);
-	if(ret) {
-		errno = -ret;
-		return -1;
-	}
+	if (!ret)
+		failback = false;
 #endif
 	/*
 	 * 4k is the smallest possible transfer unit, so restricting to 4k
@@ -434,15 +438,17 @@ int nvme_get_log_page(int fd, __u32 xfer_len, struct nvme_get_log_args *args)
 		args->len = xfer;
 		args->log = ptr;
 		args->rae = offset + xfer < data_len || retain;
+		if (failback)
+			ret = nvme_get_log(args);
 #ifdef CONFIG_LIBURING
-		if (n >= NVME_URING_ENTRIES) {
-			nvme_uring_cmd_wait_complete(&ring, n);
-			n = 0;
+		else {
+			if (n >= NVME_URING_ENTRIES) {
+				nvme_uring_cmd_wait_complete(&ring, n);
+				n = 0;
+			}
+			n += 1;
+			ret = nvme_uring_cmd_admin_passthru_async(&ring, args);
 		}
-		n += 1;
-		ret = nvme_uring_cmd_admin_passthru_async(&ring, args);
-#else
-		ret = nvme_get_log(args);
 #endif
 		if (ret)
 			return ret;
@@ -452,10 +458,12 @@ int nvme_get_log_page(int fd, __u32 xfer_len, struct nvme_get_log_args *args)
 	} while (offset < data_len);
 
 #ifdef CONFIG_LIBURING
-	ret = nvme_uring_cmd_wait_complete(&ring, n);
-	if (ret < 0)
-		return -1;
-	nvme_uring_cmd_exit(&ring);
+	if (!failback) {
+		ret = nvme_uring_cmd_wait_complete(&ring, n);
+		if (ret < 0)
+			return -1;
+		nvme_uring_cmd_exit(&ring);
+	}
 #endif
 
 	return 0;
