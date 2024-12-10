@@ -8,13 +8,16 @@
  */
 #include <errno.h>
 #include <fcntl.h>
-#include <liburing.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <inttypes.h>
+
+#ifdef CONFIG_LIBURING
+#include <liburing.h>
+#endif
 
 #include <sys/ioctl.h>
 #include <sys/stat.h>
