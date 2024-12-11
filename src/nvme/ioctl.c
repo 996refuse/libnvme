@@ -8,16 +8,15 @@
  */
 #include <errno.h>
 #include <fcntl.h>
+#ifdef CONFIG_LIBURING
+#include <liburing.h>
+#endif
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <inttypes.h>
-
-#ifdef CONFIG_LIBURING
-#include <liburing.h>
-#endif
 
 #include <sys/ioctl.h>
 #include <sys/stat.h>
@@ -325,7 +324,7 @@ static int nvme_uring_cmd_setup(struct io_uring *ring)
 {
 	struct io_uring_probe *probe = io_uring_get_probe();
 	if (!io_uring_opcode_supported(probe, IORING_OP_URING_CMD)) {
-		perror("IORING_OP_URING_CMD is not supported for the kernel version below 5.19, failback ioctl interface.");
+
 		return -1;
 	}
 	return io_uring_queue_init(NVME_URING_ENTRIES, ring, IORING_SETUP_SQE128 | IORING_SETUP_CQE32);
@@ -412,13 +411,14 @@ int nvme_get_log_page(int fd, __u32 xfer_len, struct nvme_get_log_args *args)
 
 	args->fd = fd;
 
-	bool failback = true;
+	bool fallback = true;
 #ifdef CONFIG_LIBURING
 	struct io_uring ring;
 	int n = 0;
 	ret = nvme_uring_cmd_setup(&ring);
+	/* IORING_OP_URING_CMD is not supported, fallback ioctl interface. */
 	if (!ret)
-		failback = false;
+		fallback = false;
 #endif
 	/*
 	 * 4k is the smallest possible transfer unit, so restricting to 4k
@@ -438,7 +438,7 @@ int nvme_get_log_page(int fd, __u32 xfer_len, struct nvme_get_log_args *args)
 		args->len = xfer;
 		args->log = ptr;
 		args->rae = offset + xfer < data_len || retain;
-		if (failback)
+		if (fallback)
 			ret = nvme_get_log(args);
 #ifdef CONFIG_LIBURING
 		else {
@@ -458,7 +458,7 @@ int nvme_get_log_page(int fd, __u32 xfer_len, struct nvme_get_log_args *args)
 	} while (offset < data_len);
 
 #ifdef CONFIG_LIBURING
-	if (!failback) {
+	if (!fallback) {
 		ret = nvme_uring_cmd_wait_complete(&ring, n);
 		if (ret < 0)
 			return -1;
