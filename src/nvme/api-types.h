@@ -90,6 +90,8 @@ struct nvme_get_log_args {
 	__u8 uuidx;
 	bool rae;
 	bool ot;
+	__u32 end_mark;
+	__u32 log_len;
 };
 
 /**

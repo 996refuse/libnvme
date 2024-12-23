@@ -350,6 +350,11 @@ int nvme_get_log_page(int fd, __u32 xfer_len, struct nvme_get_log_args *args)
 
 		offset += xfer;
 		ptr += xfer;
+
+		if (args->end_mark == *(uint32_t *)args->log) {
+			args->log_len = offset;
+			break;
+		}
 	} while (offset < data_len);
 
 	return 0;
